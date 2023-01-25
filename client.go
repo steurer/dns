@@ -37,6 +37,16 @@ type Conn struct {
 	TsigSecret     map[string]string // secret(s) for Tsig map[<zonename>]<base64 secret>, zonename must be in canonical form (lowercase, fqdn, see RFC 4034 Section 6.2)
 	TsigProvider   TsigProvider      // An implementation of the TsigProvider interface. If defined it replaces TsigSecret and is used for all TSIG operations.
 	tsigRequestMAC string
+	// BEGIN FAST UDP MONKEY PATCH
+	UnboundUDP bool
+	RemoteAddr net.Addr
+	// END FAST UDP MONKEY PATCH
+}
+
+func NewDnsConn() *Conn {
+	return &Conn{
+		messageBuffer: sync.Map{},
+	}
 }
 
 // A Client defines parameters for a DNS client.
@@ -383,8 +393,12 @@ func (co *Conn) Write(p []byte) (int, error) {
 		return 0, &Error{err: "message too large"}
 	}
 
-	if isPacketConn(co.Conn) {
-		return co.Conn.Write(p)
+	if pc, ok := co.Conn.(net.PacketConn); ok {
+		// MONKEY PATCH
+		if co.UnboundUDP {
+			return pc.WriteTo(p, co.RemoteAddr)
+		}
+		// END MONKEY PATCH
 	}
 
 	msg := make([]byte, 2+len(p))
