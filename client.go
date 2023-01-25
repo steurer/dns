@@ -6,10 +6,12 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -41,6 +43,9 @@ type Conn struct {
 	UnboundUDP bool
 	RemoteAddr net.Addr
 	// END FAST UDP MONKEY PATCH
+
+	messageBuffer sync.Map
+	readMu        sync.Mutex
 }
 
 func NewDnsConn() *Conn {
@@ -243,31 +248,51 @@ func (c *Client) exchangeContext(ctx context.Context, m *Msg, co *Conn) (r *Msg,
 		return nil, 0, err
 	}
 
-	if isPacketConn(co.Conn) {
-		for {
-			r, err = co.ReadMsg()
-			// Ignore replies with mismatched IDs because they might be
-			// responses to earlier queries that timed out.
-			if err != nil || r.Id == m.Id {
-				break
-			}
-		}
-	} else {
-		r, err = co.ReadMsg()
-		if err == nil && r.Id != m.Id {
-			err = ErrId
-		}
-	}
+	r, err = co.ReadMsg(m.Id)
 	rtt = time.Since(t)
 	return r, rtt, err
 }
 
 // ReadMsg reads a message from the connection co.
 // If the received message contains a TSIG record the transaction signature
-// is verified. This method always tries to return the message, however if an
+// is verified. This methoFCd always tries to return the message, however if an
 // error is returned there are no guarantees that the returned message is a
 // valid representation of the packet read.
-func (co *Conn) ReadMsg() (*Msg, error) {
+func (co *Conn) ReadMsg(msgId uint16) (*Msg, error) {
+
+	// TODO timeout
+	for {
+
+		// Check
+		if entry, loaded := co.messageBuffer.LoadAndDelete(msgId); loaded {
+			return entry.(*Msg), nil
+		}
+
+		// Lock
+		co.readMu.Lock()
+
+		// Check
+		if entry, loaded := co.messageBuffer.LoadAndDelete(msgId); loaded {
+			co.readMu.Unlock()
+			return entry.(*Msg), nil
+		}
+
+		nxtMsg, err := co.readNextMsg()
+
+		if errors.Is(err, io.EOF) {
+			fmt.Println("eof")
+		}
+
+		if err != nil || nxtMsg.Id == msgId {
+			co.readMu.Unlock()
+			return nxtMsg, err
+		}
+		co.messageBuffer.Store(nxtMsg.Id, nxtMsg)
+		co.readMu.Unlock()
+	}
+}
+
+func (co *Conn) readNextMsg() (*Msg, error) {
 	p, err := co.ReadMsgHeader(nil)
 	if err != nil {
 		return nil, err
@@ -314,7 +339,7 @@ func (co *Conn) ReadMsgHeader(hdr *Header) ([]byte, error) {
 	} else {
 		var length uint16
 		if err := binary.Read(co.Conn, binary.BigEndian, &length); err != nil {
-			return nil, err
+			return nil, err // THIS IS WHERE THE EOFs COME FROM - CONN closed?
 		}
 
 		p = make([]byte, length)
@@ -461,7 +486,7 @@ func ExchangeConn(c net.Conn, m *Msg) (r *Msg, err error) {
 	if err = co.WriteMsg(m); err != nil {
 		return nil, err
 	}
-	r, err = co.ReadMsg()
+	r, err = co.ReadMsg(m.Id)
 	if err == nil && r.Id != m.Id {
 		err = ErrId
 	}

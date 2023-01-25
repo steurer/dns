@@ -440,7 +440,7 @@ func TestClientConn(t *testing.T) {
 	if err != nil {
 		t.Errorf("failed to exchange: %v", err)
 	}
-	r, err := cn.ReadMsg()
+	r, err := cn.ReadMsg(m.Id)
 	if err != nil {
 		t.Errorf("failed to get a valid answer: %v", err)
 	}

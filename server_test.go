@@ -779,7 +779,7 @@ func checkInProgressQueriesAtShutdownServer(t *testing.T, srv *Server, addr stri
 		eg.Go(func() error {
 			conn.SetReadDeadline(time.Now().Add(client.Timeout))
 
-			_, err := conn.ReadMsg()
+			_, err := conn.ReadMsg(m.Id)
 			return err
 		})
 	}
