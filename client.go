@@ -248,7 +248,6 @@ func (c *Client) exchangeContext(ctx context.Context, m *Msg, co *Conn) (r *Msg,
 		return nil, 0, err
 	}
 
-	r, err = co.ReadMsg(m.Id)
 	rtt = time.Since(t)
 	return r, rtt, err
 }
@@ -260,35 +259,44 @@ func (c *Client) exchangeContext(ctx context.Context, m *Msg, co *Conn) (r *Msg,
 // valid representation of the packet read.
 func (co *Conn) ReadMsg(msgId uint16) (*Msg, error) {
 
-	// TODO timeout
-	for {
-
-		// Check
-		if entry, loaded := co.messageBuffer.LoadAndDelete(msgId); loaded {
-			return entry.(*Msg), nil
+	if isPacketConn(co.Conn) {
+		for {
+			r, err := co.readNextMsg()
+			// Ignore replies with mismatched IDs because they might be
+			// responses to earlier queries that timed out.
+			if err != nil || r.Id == msgId {
+				return r, err
+			}
 		}
+	} else {
+		for {
+			// Check
+			if entry, loaded := co.messageBuffer.LoadAndDelete(msgId); loaded {
+				return entry.(*Msg), nil
+			}
 
-		// Lock
-		co.readMu.Lock()
+			// Lock
+			co.readMu.Lock()
 
-		// Check
-		if entry, loaded := co.messageBuffer.LoadAndDelete(msgId); loaded {
+			// Check
+			if entry, loaded := co.messageBuffer.LoadAndDelete(msgId); loaded {
+				co.readMu.Unlock()
+				return entry.(*Msg), nil
+			}
+
+			nxtMsg, err := co.readNextMsg()
+
+			if errors.Is(err, io.EOF) {
+				fmt.Println("eof")
+			}
+
+			if err != nil || nxtMsg.Id == msgId {
+				co.readMu.Unlock()
+				return nxtMsg, err
+			}
+			co.messageBuffer.Store(nxtMsg.Id, nxtMsg)
 			co.readMu.Unlock()
-			return entry.(*Msg), nil
 		}
-
-		nxtMsg, err := co.readNextMsg()
-
-		if errors.Is(err, io.EOF) {
-			fmt.Println("eof")
-		}
-
-		if err != nil || nxtMsg.Id == msgId {
-			co.readMu.Unlock()
-			return nxtMsg, err
-		}
-		co.messageBuffer.Store(nxtMsg.Id, nxtMsg)
-		co.readMu.Unlock()
 	}
 }
 
@@ -478,7 +486,6 @@ func ExchangeContext(ctx context.Context, m *Msg, a string) (r *Msg, err error) 
 //	co.WriteMsg(m)
 //	in, _  := co.ReadMsg()
 //	co.Close()
-//
 func ExchangeConn(c net.Conn, m *Msg) (r *Msg, err error) {
 	println("dns: ExchangeConn: this function is deprecated")
 	co := new(Conn)

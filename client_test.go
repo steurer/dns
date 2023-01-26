@@ -621,7 +621,7 @@ func TestTruncatedMsg(t *testing.T) {
 	}
 }
 
-func TestTimeout(t *testing.T) {
+func TestTimeoutUDP(t *testing.T) {
 	// Set up a dummy UDP server that won't respond
 	addr, err := net.ResolveUDPAddr("udp", ":0")
 	if err != nil {
@@ -633,6 +633,53 @@ func TestTimeout(t *testing.T) {
 	}
 	defer conn.Close()
 	addrstr := conn.LocalAddr().String()
+
+	// Message to send
+	m := new(Msg)
+	m.SetQuestion("miek.nl.", TypeTXT)
+
+	runTest := func(name string, exchange func(m *Msg, addr string, timeout time.Duration) (*Msg, time.Duration, error)) {
+		t.Run(name, func(t *testing.T) {
+			start := time.Now()
+
+			timeout := time.Millisecond
+			allowable := timeout + 10*time.Millisecond
+
+			_, _, err := exchange(m, addrstr, timeout)
+			if err == nil {
+				t.Errorf("no timeout using Client.%s", name)
+			}
+
+			length := time.Since(start)
+			if length > allowable {
+				t.Errorf("exchange took longer %v than specified Timeout %v", length, allowable)
+			}
+		})
+	}
+	runTest("Exchange", func(m *Msg, addr string, timeout time.Duration) (*Msg, time.Duration, error) {
+		c := &Client{Timeout: timeout}
+		return c.Exchange(m, addr)
+	})
+	runTest("ExchangeContext", func(m *Msg, addr string, timeout time.Duration) (*Msg, time.Duration, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+
+		return new(Client).ExchangeContext(ctx, m, addrstr)
+	})
+}
+
+func TestTimeoutTCP(t *testing.T) {
+	// Set up a dummy UDP server that won't respond
+	addr, err := net.ResolveTCPAddr("tcp", ":0")
+	if err != nil {
+		t.Fatalf("unable to resolve local udp address: %v", err)
+	}
+	conn, err := net.ListenTCP("tcp", addr)
+	if err != nil {
+		t.Fatalf("unable to run test server: %v", err)
+	}
+	defer conn.Close()
+	addrstr := conn.Addr().String()
 
 	// Message to send
 	m := new(Msg)
