@@ -48,12 +48,6 @@ type Conn struct {
 	readMu        sync.Mutex
 }
 
-func NewDnsConn() *Conn {
-	return &Conn{
-		messageBuffer: sync.Map{},
-	}
-}
-
 // A Client defines parameters for a DNS client.
 type Client struct {
 	Net       string      // if "tcp" or "tcp-tls" (DNS over TLS) a TCP query will be initiated, otherwise an UDP one (default is "" for UDP)
@@ -130,7 +124,7 @@ func (c *Client) DialContext(ctx context.Context, address string) (conn *Conn, e
 
 	useTLS := strings.HasPrefix(network, "tcp") && strings.HasSuffix(network, "-tls")
 
-	conn = NewDnsConn()
+	conn = new(Conn)
 	if useTLS {
 		network = strings.TrimSuffix(network, "-tls")
 
@@ -460,7 +454,7 @@ func (c *Client) getTimeoutForRequest(timeout time.Duration) time.Duration {
 
 // Dial connects to the address on the named network.
 func Dial(network, address string) (conn *Conn, err error) {
-	conn = NewDnsConn()
+	conn = new(Conn)
 	conn.Conn, err = net.Dial(network, address)
 	if err != nil {
 		return nil, err
@@ -488,7 +482,7 @@ func ExchangeContext(ctx context.Context, m *Msg, a string) (r *Msg, err error) 
 //	co.Close()
 func ExchangeConn(c net.Conn, m *Msg) (r *Msg, err error) {
 	println("dns: ExchangeConn: this function is deprecated")
-	co := NewDnsConn()
+	co := new(Conn)
 	co.Conn = c
 	if err = co.WriteMsg(m); err != nil {
 		return nil, err
