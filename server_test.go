@@ -48,6 +48,23 @@ func HelloServerBadThenGoodID(w ResponseWriter, req *Msg) {
 	w.WriteMsg(m)
 }
 
+func HelloServerNoResponse(w ResponseWriter, req *Msg) {
+	// Do nothing
+}
+
+func HelloServerAsyncWithDelay(w ResponseWriter, req *Msg) {
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+
+		m := new(Msg)
+		m.SetReply(req)
+
+		m.Extra = make([]RR, 1)
+		m.Extra[0] = &TXT{Hdr: RR_Header{Name: m.Question[0].Name, Rrtype: TypeTXT, Class: ClassINET, Ttl: 0}, Txt: []string{"This message arrived late"}}
+		w.WriteMsg(m)
+	}()
+}
+
 func HelloServerEchoAddrPort(w ResponseWriter, req *Msg) {
 	m := new(Msg)
 	m.SetReply(req)

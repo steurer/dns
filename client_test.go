@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -297,27 +298,6 @@ func TestClientSyncBadThenGoodID(t *testing.T) {
 	}
 	if r.Id != m.Id {
 		t.Errorf("failed to get response with expected Id")
-	}
-}
-
-func TestClientSyncTCPBadID(t *testing.T) {
-	HandleFunc("miek.nl.", HelloServerBadID)
-	defer HandleRemove("miek.nl.")
-
-	s, addrstr, _, err := RunLocalTCPServer(":0")
-	if err != nil {
-		t.Fatalf("unable to run test server: %v", err)
-	}
-	defer s.Shutdown()
-
-	m := new(Msg)
-	m.SetQuestion("miek.nl.", TypeSOA)
-
-	c := &Client{
-		Net: "tcp",
-	}
-	if _, _, err := c.Exchange(m, addrstr); err != ErrId {
-		t.Errorf("did not find a bad Id")
 	}
 }
 
@@ -713,6 +693,157 @@ func TestTimeoutTCP(t *testing.T) {
 
 		return new(Client).ExchangeContext(ctx, m, addrstr)
 	})
+}
+
+func TestClientSyncTCPBadIDTimeout(t *testing.T) {
+	HandleFunc("miek.nl.", HelloServerBadID)
+	defer HandleRemove("miek.nl.")
+
+	s, addrstr, _, err := RunLocalTCPServer(":0")
+	if err != nil {
+		t.Fatalf("unable to run test server: %v", err)
+	}
+	defer s.Shutdown()
+
+	m := new(Msg)
+	m.SetQuestion("miek.nl.", TypeSOA)
+
+	timeout := 50 * time.Millisecond
+	allowable := timeout + 20*time.Millisecond
+
+	c := &Client{
+		Net:     "tcp",
+		Timeout: timeout,
+	}
+
+	start := time.Now()
+	r, _, err := c.Exchange(m, addrstr)
+	length := time.Since(start)
+
+	if length > allowable || err == nil || r != nil {
+		t.Errorf("no timeout or message with bad id was returned")
+	}
+}
+
+func TestClientTCPOutOfOrderResponse(t *testing.T) {
+
+	HandleFunc("miek.first.", HelloServerAsyncWithDelay) // The first message will be answered delayed
+	HandleFunc("miek.second.", HelloServer)              // The second message will be answered immediately
+
+	defer HandleRemove("miek.first.")
+	defer HandleRemove("miek.second.")
+
+	s, addrstr, _, err := RunLocalTCPServer(":0")
+	if err != nil {
+		t.Fatalf("unable to run test server: %v", err)
+	}
+	defer s.Shutdown()
+
+	firstMsg := new(Msg)
+	firstMsg.SetQuestion("miek.first.", TypeSOA)
+
+	secondMsg := new(Msg)
+	secondMsg.SetQuestion("miek.second.", TypeA)
+
+	c := &Client{
+		Net: "tcp",
+	}
+
+	conn, err := c.Dial(addrstr)
+	if err != nil {
+		t.Fatalf("unable to open tcp connection to %v", addrstr)
+	}
+
+	var firstResp *Msg
+	var firstErr error
+	var secondResp *Msg
+	var secondErr error
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		firstResp, _, firstErr = c.ExchangeWithConn(firstMsg, conn)
+		wg.Done()
+	}()
+	time.Sleep(20 * time.Millisecond) // Ensures the first ExchangeWithConn has written to the connection
+	go func() {
+		secondResp, _, secondErr = c.ExchangeWithConn(secondMsg, conn)
+		wg.Done()
+	}()
+
+	wg.Wait()
+
+	if firstResp == nil || firstResp.Id != firstMsg.Id || firstErr != nil {
+		t.Errorf("error receiving out-of-order responses")
+	}
+	if len(firstResp.Extra) != 1 {
+		t.Errorf("expected to see 'Hello World' in Extra ")
+	}
+
+	if secondResp == nil || secondResp.Id != secondMsg.Id || secondErr != nil {
+		t.Errorf("error receiving out-of-order responses")
+	}
+	if len(secondResp.Extra) != 1 {
+		t.Errorf("expected to see 'Hello World' in Extra ")
+	}
+}
+
+func TestClientTCPOutOfOrderResponseTimeout(t *testing.T) {
+	HandleFunc("miek.nl.", HelloServer)
+	HandleFunc("miek.uk.", HelloServerNoResponse)
+	defer HandleRemove("miek.nl.")
+
+	s, addrstr, _, err := RunLocalTCPServer(":0")
+	if err != nil {
+		t.Fatalf("unable to run test server: %v", err)
+	}
+	defer s.Shutdown()
+
+	firstMsg := new(Msg)
+	firstMsg.SetQuestion("miek.uk.", TypeTXT) // miek.uk. will not be answered
+
+	secondMsg := new(Msg)
+	secondMsg.SetQuestion("miek.nl.", TypeTXT)
+
+	c := &Client{
+		Net:     "tcp",
+		Timeout: 100 * time.Millisecond,
+	}
+
+	conn, err := c.Dial(addrstr)
+	if err != nil {
+		t.Fatalf("unable to open tcp connection to %v", addrstr)
+	}
+
+	var firstResp *Msg
+	var firstErr error
+	var secondResp *Msg
+	var secondErr error
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		firstResp, _, firstErr = c.ExchangeWithConn(firstMsg, conn)
+		wg.Done()
+	}()
+	go func() {
+		secondResp, _, secondErr = c.ExchangeWithConn(secondMsg, conn)
+		wg.Done()
+	}()
+
+	wg.Wait()
+
+	if firstResp != nil || firstErr == nil {
+		t.Errorf("message with id %v should have timed out", firstMsg.Id)
+	}
+	if secondResp == nil || secondResp.Id != secondMsg.Id || secondErr != nil {
+		t.Errorf("error receiving out-of-order responses")
+	}
+	if len(secondResp.Extra) != 1 {
+		t.Errorf("expected to see 'Hello World' in Extra ")
+	}
 }
 
 // Check that responses from deduplicated requests aren't shared between callers
