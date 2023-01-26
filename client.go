@@ -247,7 +247,7 @@ func (c *Client) exchangeContext(ctx context.Context, m *Msg, co *Conn) (r *Msg,
 	if err = co.WriteMsg(m); err != nil {
 		return nil, 0, err
 	}
-
+	r, err = co.ReadMsg(m.Id)
 	rtt = time.Since(t)
 	return r, rtt, err
 }

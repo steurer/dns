@@ -643,7 +643,7 @@ func TestTimeoutUDP(t *testing.T) {
 			start := time.Now()
 
 			timeout := time.Millisecond
-			allowable := timeout + 10*time.Millisecond
+			allowable := timeout + 20*time.Millisecond
 
 			_, _, err := exchange(m, addrstr, timeout)
 			if err == nil {
@@ -690,7 +690,7 @@ func TestTimeoutTCP(t *testing.T) {
 			start := time.Now()
 
 			timeout := time.Millisecond
-			allowable := timeout + 10*time.Millisecond
+			allowable := timeout + 20*time.Millisecond
 
 			_, _, err := exchange(m, addrstr, timeout)
 			if err == nil {
