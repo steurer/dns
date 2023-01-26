@@ -426,6 +426,7 @@ func (co *Conn) Write(p []byte) (int, error) {
 			return pc.WriteTo(p, co.RemoteAddr)
 		}
 		// END MONKEY PATCH
+		return co.Conn.Write(p)
 	}
 
 	msg := make([]byte, 2+len(p))
