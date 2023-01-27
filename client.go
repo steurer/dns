@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -279,10 +278,6 @@ func (co *Conn) ReadMsg(msgId uint16) (*Msg, error) {
 			}
 
 			nxtMsg, err := co.readNextMsg()
-
-			if errors.Is(err, io.EOF) {
-				fmt.Println("eof")
-			}
 
 			if err != nil || nxtMsg.Id == msgId {
 				co.readMu.Unlock()
