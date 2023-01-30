@@ -126,16 +126,12 @@ func (c *Client) DialContext(ctx context.Context, address string) (conn *Conn, e
 	conn = new(Conn)
 	if useTLS {
 		network = strings.TrimSuffix(network, "-tls")
+		tlsDialer := tls.Dialer{
+			NetDialer: &d,
+			Config:    c.TLSConfig,
+		}
+		conn.Conn, err = tlsDialer.DialContext(ctx, network, address)
 
-		// TODO(miekg): Enable after Go 1.18 is released, to be able to support two prev. releases.
-		/*
-			tlsDialer := tls.Dialer{
-				NetDialer: &d,
-				Config:    c.TLSConfig,
-			}
-			conn.Conn, err = tlsDialer.DialContext(ctx, network, address)
-		*/
-		conn.Conn, err = tls.DialWithDialer(&d, network, address, c.TLSConfig)
 	} else {
 		conn.Conn, err = d.DialContext(ctx, network, address)
 	}
@@ -187,10 +183,10 @@ func (c *Client) Exchange(m *Msg, address string) (r *Msg, rtt time.Duration, er
 // When the singleflight is set for this client the context is _not_ forwarded to the (shared) exchange, to
 // prevent one cancelation from canceling all outstanding requests.
 func (c *Client) ExchangeWithConn(m *Msg, conn *Conn) (r *Msg, rtt time.Duration, err error) {
-	return c.exchangeWithConnContext(context.Background(), m, conn)
+	return c.ExchangeWithConnContext(context.Background(), m, conn)
 }
 
-func (c *Client) exchangeWithConnContext(ctx context.Context, m *Msg, conn *Conn) (r *Msg, rtt time.Duration, err error) {
+func (c *Client) ExchangeWithConnContext(ctx context.Context, m *Msg, conn *Conn) (r *Msg, rtt time.Duration, err error) {
 	if !c.SingleInflight {
 		return c.exchangeContext(ctx, m, conn)
 	}
@@ -524,5 +520,5 @@ func (c *Client) ExchangeContext(ctx context.Context, m *Msg, a string) (r *Msg,
 	}
 	defer conn.Close()
 
-	return c.exchangeWithConnContext(ctx, m, conn)
+	return c.ExchangeWithConnContext(ctx, m, conn)
 }
